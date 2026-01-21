@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+set -e
+
+# Detect shell rc file
+SHELL_RC="$HOME/.bashrc"
+if [ -n "$ZSH_VERSION" ]; then
+  SHELL_RC="$HOME/.zshrc"
+fi
+
+# Function to set API key
+set_api_key() {
+  read -p "Enter new GEMINI API Key: " GEMINI_API_KEY
+  export GEMINI_API_KEY
+
+  # Remove old key if exists safely
+  grep -v "GEMINI_API_KEY" "$SHELL_RC" > "$SHELL_RC.tmp" && mv "$SHELL_RC.tmp" "$SHELL_RC"
+  
+  # Append new key
+  echo "export GEMINI_API_KEY=$GEMINI_API_KEY" >> "$SHELL_RC"
+  echo "✅ GEMINI_API_KEY updated in $SHELL_RC. Restart your terminal to apply."
+}
+
+# Handle change-api command
+if [ "$1" = "change-api" ]; then
+  set_api_key
+  exit 0
+fi
+
+# Load GEMINI_API_KEY from shell rc if available
+if [ -z "$GEMINI_API_KEY" ] && [ -f "$SHELL_RC" ]; then
+  source "$SHELL_RC"
+fi
+
+# Prompt for API key if still not set
+if [ -z "$GEMINI_API_KEY" ]; then
+  read -p "Enter your GEMINI API Key: " GEMINI_API_KEY
+  export GEMINI_API_KEY
+  # Save permanently if not already there
+  if ! grep -q "GEMINI_API_KEY" "$SHELL_RC"; then
+    echo "export GEMINI_API_KEY=$GEMINI_API_KEY" >> "$SHELL_RC"
+    echo "✅ GEMINI_API_KEY saved to $SHELL_RC. Restart your terminal to apply."
+  fi
+fi
+
+# Ensure user provided a prompt
+if [ $# -lt 1 ]; then
+  echo "Usage: gen <prompt>"
+  echo "       gen change-api   # to change GEMINI API key"
+  exit 1
+fi
+
+# Combine all arguments as the user prompt
+USER_PROMPT="$*"
+
+# Instruction to Gemini: only return shell command
+SYSTEM_PROMPT="You are a shell command generator.
+- Return only a single shell command, no explanation.
+- If the user request is unrelated to shell commands, reply in 1-2 concise lines only."
+
+FULL_PROMPT="$SYSTEM_PROMPT
+User request: $USER_PROMPT"
+
+# Call Gemini 2.5 Flash
+RESPONSE=$(curl -s "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent" \
+  -H "x-goog-api-key: $GEMINI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -X POST \
+  -d "{
+    \"contents\": [
+      {
+        \"parts\": [
+          {\"text\": \"$FULL_PROMPT\"}
+        ]
+      }
+    ]
+  }")
+
+# Handle curl failure or empty response
+if [ $? -ne 0 ] || [ -z "$RESPONSE" ]; then
+echo "hello"
+  echo "❌ Error generating response"
+  exit 1
+fi
+# Parse output: jq if available, otherwise safe sed fallback
+if command -v jq >/dev/null 2>&1; then
+  OUTPUT=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text')
+else
+  # Robust sed fallback for text inside "text": "..."
+  OUTPUT=$(echo "$RESPONSE" | sed -n 's/.*"text":[[:space:]]*"\([^"]*\)".*/\1/p')
+fi
+
+# Check if output is empty
+if [ -z "$OUTPUT" ]; then
+  echo "❌ Error generating response"
+  exit 1
+fi
+
+# Print the final command/response
+echo "$OUTPUT"
+
+# Execute the command directly in the current shell
+# eval "$OUTPUT"
+
+read -p "Do you want to run $OUTPUT ? [y/N]: " RUN_CMD
+if [[ "$RUN_CMD" =~ ^[Yy]$ ]]; then
+  echo "▶ Running the command..."
+  eval "$OUTPUT"
+else
+  echo "⚠ Command not executed."
+fi
