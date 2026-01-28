@@ -1,0 +1,16 @@
+{
+  "name": "gn-cli",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "bin": {
+    "gn": "./index.js"
+  },
+  "author": "Anish Sabharwal",
+  "keywords": ["cli", "gemini", "shell"],
+  "license": "MIT",
+  "description": "",
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
+}
